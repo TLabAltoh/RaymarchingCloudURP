@@ -1,0 +1,69 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+static const int threadGroupSize = 8;
+
+int numLayers;
+float lacunarity;
+float persistence;
+
+int numPoints;
+int resolution;
+float multiplier;
+float multiplier2;
+float offset;
+int seed;
+RWTexture2D<float4> values;
+
+//rand構造体 ; GLSLやMATLABで定義されている模擬ランダム関数(この関数はそれを模写している)
+ float rand(float2 uv)
+{
+    float f = dot(float2(12.9898, 78.233), uv);
+
+    //小数値の少数部分を返している
+    return frac(43758.5453 * sin(f));
+}
+
+
+ //8 * 8 * 1 = 64 threadsを並列で実行する
+[numthreads(threadGroupSize,threadGroupSize,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    //2次元配列のポインタをテクセルの大きさで割った値をposとして定義している
+    //[0, 1]に正規化されるので、posは事実上のuv座標となる
+    float2 pos = float2(id.x, id.y) / resolution;
+    float value = 0;
+
+    float amplitude = 1;
+
+    //numPoints = 5 なので1つのレイヤーにつき、5つのテクセル座標をランダムに生成していることになる
+    float numPointsInLayer = numPoints;
+
+    for (int layer = 0; layer < numLayers; layer ++) {
+        float minD = 1;
+
+        //layerOffsetすらもランダムな値として取得
+        float layerOffset = rand(float2(layer, seed));
+        for (int i = 0; i < numPointsInLayer; i ++) {
+            
+            //ランダムな引数でランダムな値を生成
+            float2 otherPos = float2(rand(float2(i*4+0, i*4+1) + layerOffset),rand(float2(i*4+2, i*4+3) + layerOffset));
+            
+            //周りとの距離を測る
+            float d = length(pos - otherPos);
+            
+            //ランダムに生成した5つの座標の中で、最も距離の近かった座標との距離をテクセルの色に設定する
+            minD = min(minD, d);
+        }
+
+        //値を二乗してエッジを明確にしている
+        value += minD * amplitude;
+        amplitude *= persistence;
+        numPointsInLayer *= lacunarity;
+    }
+    
+    //やっぱりCompute shader はTextureを2次元配列として扱えるから使いやすい
+    //off set = 0.66
+    //1 - valueをして生成したノイズの白黒を反転する
+    values[id.xy] = (1 - value * multiplier2 - offset) * multiplier;
+}
